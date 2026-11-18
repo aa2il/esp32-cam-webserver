@@ -15,7 +15,12 @@
 #include <esp_http_server.h>
 #include <esp_timer.h>
 #include <esp_camera.h>
-#include <esp_int_wdt.h>
+
+// JBA - Newest esp32 libs hide some things - grab them
+//#include <esp_int_wdt.h>
+#include "esp_private/esp_int_wdt.h"
+#include "esp_private/periph_ctrl.h"
+
 #include <esp_task_wdt.h>
 #include <Arduino.h>
 #include <WiFi.h>
@@ -414,7 +419,16 @@ static esp_err_t cmd_handler(httpd_req_t *req){
     }
     else if(!strcmp(variable, "reboot")) {
         if (lampVal != -1) setLamp(0); // kill the lamp; otherwise it can remain on during the soft-reboot
-        esp_task_wdt_init(3,true);  // schedule a a watchdog panic event for 3 seconds in the future
+        
+        // JBA - API has changed in latest esp32 libs
+        //esp_task_wdt_init(3,true);  // schedule a a watchdog panic event for 3 seconds in the future
+        esp_task_wdt_config_t twdt_config = {
+            .timeout_ms = 3000,                   // 3 seconds in milliseconds
+            .idle_core_mask = (1 << 0) | (1 << 1), // Monitor idle tasks on both cores
+            .trigger_panic = true                 // Trigger panic on timeout
+        };
+        esp_task_wdt_reconfigure(&twdt_config);
+        
         esp_task_wdt_add(NULL);
         periph_module_disable(PERIPH_I2C0_MODULE); // try to shut I2C down properly
         periph_module_disable(PERIPH_I2C1_MODULE);

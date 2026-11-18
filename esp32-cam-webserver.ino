@@ -1,5 +1,51 @@
+/* ************************************************************************************************
+
+   JBA - This is an enhanced version of the ESP32 camera web server from
+         https://github.com/easytarget/esp32-cam-webserver
+
+   This was the code I had in the two ESP32cams in the barn for quite some time.
+   It was updated in Nov 2026 to conform to the latest ESP32 libraries/API and latest Arduino IDE.
+
+   Enhancements;
+     - More options for default network and camera settings
+     - Save and restore settings
+     - Control of on-board lamps, rotate the view in the browser
+     - Dedicated standalone stream viewer
+     - Over The Air firmware updates
+     - Lots of minor fixes and tweaks, documentation etc.
+   
+   This project has been abandoned.  The author claims will not work with current (as of 2026)
+   IDE and libs.  I searched around for an alternative but found nothing nearly as stable and
+   capable as this implementation.
+      - The current WebCameraServer example works reasonably well but occasionally trunactes
+        frames leading to WiFi errors
+
+   I spent a couple of hours with chatGPT just entering the complier errors and
+   applying the suggested changes and this code now works with IDE 2.3.11, which is the
+   latest as of Nov 2026.
+       - The changes are noted below (and in app_httpd.cpp) with my initials (JBA)
+   
+   See README for how to set-up IDE and build.  Seems to work quite well!
+   Need to use IDE >=2.0.03
+
+   Used Nano-based programmer to effect serial port for the ESP32-CAM
+   Board type is AI THINKER?
+   Baud rate is hardwired to 115200
+
+   NOTE - This sketch does have OTA - need to select Tools->Parition Scheme-> Minimal SPIFFS (... with OTA ...)
+   The default for the AI Thinker esp32cam is Huge APP which does not support OTA!
+   After initial sketch is uploaded via USB, can select baord with IP addr from
+   menu and update new firmware remotely.
+
+************************************************************************************************ */
+
 #include <esp_camera.h>
-#include <esp_int_wdt.h>
+
+// JBA - Newest esp32 libs hide some things from the API - reveal them
+// #include <esp_int_wdt.h>
+#include "esp_private/esp_int_wdt.h"
+#include "esp_private/periph_ctrl.h"
+
 #include <esp_task_wdt.h>
 #include <WiFi.h>
 #include <DNSServer.h>
@@ -8,7 +54,6 @@
 #include "src/parsebytes.h"
 #include "time.h"
 #include <ESPmDNS.h>
-
 
 /* This sketch is a extension/expansion/reork of the 'official' ESP32 Camera example
  *  sketch from Expressif:
@@ -363,7 +408,15 @@ void StartCamera() {
         critERR = "<h1>Error!</h1><hr><p>Camera module failed to initialise!</p><p>Please reset (power off/on) the camera.</p>";
         critERR += "<p>We will continue to reboot once per minute since this error sometimes clears automatically.</p>";
         // Start a 60 second watchdog timer
-        esp_task_wdt_init(60,true);
+        // JBA - API has changed in latest esp32 libs
+        // esp_task_wdt_init(60,true);
+        esp_task_wdt_config_t twdt_config = {
+            .timeout_ms = 60000,                  // 60 seconds in milliseconds
+            .idle_core_mask = (1 << 0) | (1 << 1), // Monitor idle tasks on both cores
+            .trigger_panic = true                 // Trigger panic on timeout (replaces 'true')
+        };
+        esp_task_wdt_reconfigure(&twdt_config);
+        
         esp_task_wdt_add(NULL);
     } else {
         Serial.println("Camera init succeeded");
@@ -763,11 +816,14 @@ void setup() {
     sketchSpace = ESP.getFreeSketchSpace();
     sketchMD5 = ESP.getSketchMD5();
 
-    // Initialise and set the lamp
+    // Initialise and set the lamp 
     if (lampVal != -1) {
         #if defined(LAMP_PIN)
-            ledcSetup(lampChannel, pwmfreq, pwmresolution);  // configure LED PWM channel
-            ledcAttachPin(LAMP_PIN, lampChannel);            // attach the GPIO pin to the channel
+            // JBA - API has changed for this
+            //ledcSetup(lampChannel, pwmfreq, pwmresolution);  // configure LED PWM channel
+            //ledcAttachPin(LAMP_PIN, lampChannel);            // attach the GPIO pin to the channel
+            ledcAttach(LAMP_PIN, pwmfreq, pwmresolution);    // configure and attach LED PWM to GPIO pin
+            
             if (autoLamp) setLamp(0);                        // set default value
             else setLamp(lampVal);
          #endif
